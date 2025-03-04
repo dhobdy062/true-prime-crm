@@ -42,3 +42,5 @@ The CRM is designed to work with the following Airtable tables:
 - Activity timeline
 - Performance dashboards
 - Mobile optimization
+
+## lets's hope it works
