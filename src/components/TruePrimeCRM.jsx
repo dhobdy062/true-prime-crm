@@ -1,7 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { X, Mail, Phone, Globe, Filter } from 'lucide-react';
+import { 
+  getLeads, 
+  getSalesPeople, 
+  assignLeadToSalesPerson, 
+  updateLeadDisposition, 
+  addNote,
+  getNotesForLead,
+  getDispositionOptions
+} from '../utils/airtable';
 
-const TruePrimeCRM = () => {
+const TruePrimeKanban = () => {
   // State for leads, salespeople, filters, and UI elements
   const [leads, setLeads] = useState([]);
   const [salesPeople, setSalesPeople] = useState([]);
@@ -14,39 +23,61 @@ const TruePrimeCRM = () => {
   const [disposition, setDisposition] = useState('');
   const [draggedLead, setDraggedLead] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [dispositionOptions, setDispositionOptions] = useState([]);
+  const [leadNotes, setLeadNotes] = useState([]);
 
-  // Mock data fetch function - would be replaced with actual Airtable API calls
+  // Fetch data from Airtable
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // This would be replaced with actual Airtable API calls
-        const mockLeads = [
-          { id: 'lead1', name: 'Acme Corporation', phone: '555-123-4567', email: 'contact@acme.com', website: 'https://acme.com', industry: 'Manufacturing', address: '123 Main St, Boston, MA', assignedTo: null, disposition: null },
-          { id: 'lead2', name: 'TechStart Inc', phone: '555-987-6543', email: 'info@techstart.io', website: 'https://techstart.io', industry: 'Technology', address: '456 Innovation Ave, San Francisco, CA', assignedTo: null, disposition: null },
-          { id: 'lead3', name: 'Green Earth Foods', phone: '555-456-7890', email: 'hello@greenearth.com', website: 'https://greenearth.com', industry: 'Food', address: '789 Organic Lane, Portland, OR', assignedTo: null, disposition: null },
-          { id: 'lead4', name: 'Financial Partners', phone: '555-246-8102', email: 'clients@finpartners.com', website: 'https://finpartners.com', industry: 'Finance', address: '101 Money St, New York, NY', assignedTo: null, disposition: null },
-          { id: 'lead5', name: 'Creative Solutions', phone: '555-135-7924', email: 'design@creativesol.com', website: 'https://creativesol.com', industry: 'Design', address: '202 Art Blvd, Austin, TX', assignedTo: null, disposition: null },
+        setLoading(true);
+        
+        // Get leads and sales people from Airtable
+        const leadsData = await getLeads();
+        const salesPeopleData = await getSalesPeople();
+        
+        // Calculate total leads for each sales person
+        const updatedSalesPeople = salesPeopleData.map(sp => {
+          const assignedLeads = leadsData.filter(lead => 
+            lead.assignedTo === sp.id
+          );
+          
+          // Count open leads (leads without a disposition)
+          const openLeadsCount = assignedLeads.filter(lead => 
+            !lead.disposition
+          ).length;
+          
+          return {
+            ...sp,
+            openLeads: openLeadsCount,
+            totalLeads: assignedLeads.length
+          };
+        });
+        
+        // Extract unique industries and cities for filtering
+        const uniqueIndustries = [...new Set(leadsData
+          .filter(lead => lead.industry)
+          .map(lead => lead.industry))
         ];
         
-        const mockSalesPeople = [
-          { id: 'sp1', name: 'Alex Johnson', email: 'alex@trueprime.com', phone: 'x1001', openLeads: 0, totalLeads: 0 },
-          { id: 'sp2', name: 'Sam Williams', email: 'sam@trueprime.com', phone: 'x1002', openLeads: 0, totalLeads: 0 },
-          { id: 'sp3', name: 'Jordan Smith', email: 'jordan@trueprime.com', phone: 'x1003', openLeads: 0, totalLeads: 0 },
+        const uniqueCities = [...new Set(leadsData
+          .filter(lead => lead.city)
+          .map(lead => lead.city))
         ];
         
-        // Extract industries and cities for filters
-        const uniqueIndustries = [...new Set(mockLeads.map(lead => lead.industry))];
-        const uniqueCities = [...new Set(mockLeads.map(lead => {
-          const addressParts = lead.address.split(',');
-          return addressParts[addressParts.length - 2]?.trim() || '';
-        }))];
+        // Get disposition options
+        const dispOptions = getDispositionOptions();
         
-        setLeads(mockLeads);
-        setSalesPeople(mockSalesPeople);
+        setLeads(leadsData);
+        setSalesPeople(updatedSalesPeople);
         setIndustries(uniqueIndustries);
         setCities(uniqueCities);
+        setDispositionOptions(dispOptions);
+        setLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
+        setLoading(false);
       }
     };
     
@@ -56,9 +87,7 @@ const TruePrimeCRM = () => {
   // Filter leads based on selected filters
   const filteredLeads = leads.filter(lead => {
     const matchesIndustry = !filterIndustry || lead.industry === filterIndustry;
-    const addressParts = lead.address.split(',');
-    const city = addressParts[addressParts.length - 2]?.trim() || '';
-    const matchesCity = !filterCity || city === filterCity;
+    const matchesCity = !filterCity || lead.city === filterCity;
     return matchesIndustry && matchesCity && !lead.assignedTo;
   });
 
@@ -77,12 +106,12 @@ const TruePrimeCRM = () => {
     setDragOverColumn(null);
   };
 
-  const handleDrop = (e, salesPersonId) => {
+  const handleDrop = async (e, salesPersonId) => {
     e.preventDefault();
     if (!draggedLead) return;
     
     // Check if this is a valid drop target
-    if (!salesPersonId.startsWith('sp')) return;
+    if (!salesPersonId) return;
     
     const salesperson = salesPeople.find(sp => sp.id === salesPersonId);
     
@@ -92,35 +121,53 @@ const TruePrimeCRM = () => {
       return;
     }
     
-    // Assign lead to salesperson
-    setLeads(leads.map(lead => {
-      if (lead.id === draggedLead.id) {
-        return { ...lead, assignedTo: salesPersonId };
-      }
-      return lead;
-    }));
-    
-    // Update salesperson's lead counts
-    setSalesPeople(salesPeople.map(sp => {
-      if (sp.id === salesPersonId) {
-        return { 
-          ...sp, 
-          openLeads: sp.openLeads + 1, 
-          totalLeads: sp.totalLeads + 1 
-        };
-      }
-      return sp;
-    }));
+    try {
+      // Call Airtable API to assign lead
+      await assignLeadToSalesPerson(draggedLead.id, salesPersonId);
+      
+      // Update local state
+      setLeads(leads.map(lead => {
+        if (lead.id === draggedLead.id) {
+          return { ...lead, assignedTo: salesPersonId };
+        }
+        return lead;
+      }));
+      
+      // Update salesperson's lead counts
+      setSalesPeople(salesPeople.map(sp => {
+        if (sp.id === salesPersonId) {
+          return { 
+            ...sp, 
+            openLeads: sp.openLeads + 1, 
+            totalLeads: sp.totalLeads + 1 
+          };
+        }
+        return sp;
+      }));
+      
+    } catch (error) {
+      console.error('Error assigning lead:', error);
+      alert('Failed to assign lead. Please try again.');
+    }
     
     setDraggedLead(null);
     setDragOverColumn(null);
   };
 
-  // Open lead details modal
-  const openLeadDetails = (lead) => {
+  // Open lead details modal and fetch notes
+  const openLeadDetails = async (lead) => {
     setSelectedLead(lead);
     setDisposition(lead.disposition || '');
     setNote('');
+    
+    try {
+      // Fetch notes for this lead
+      const notes = await getNotesForLead(lead.id);
+      setLeadNotes(notes);
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+      setLeadNotes([]);
+    }
   };
 
   // Close lead details modal
@@ -128,39 +175,56 @@ const TruePrimeCRM = () => {
     setSelectedLead(null);
     setDisposition('');
     setNote('');
+    setLeadNotes([]);
   };
 
   // Save lead disposition and note
-  const saveLeadDetails = () => {
+  const saveLeadDetails = async () => {
     if (!selectedLead) return;
     
-    // Update lead with new disposition
-    const updatedLeads = leads.map(lead => {
-      if (lead.id === selectedLead.id) {
-        return { ...lead, disposition };
+    try {
+      // Update disposition in Airtable
+      if (selectedLead.disposition !== disposition) {
+        await updateLeadDisposition(selectedLead.id, disposition);
       }
-      return lead;
-    });
-    
-    setLeads(updatedLeads);
-    
-    // If lead is assigned and disposition is updated, update salesperson's open lead count
-    if (selectedLead.assignedTo && !selectedLead.disposition && disposition) {
-      setSalesPeople(salesPeople.map(sp => {
-        if (sp.id === selectedLead.assignedTo) {
-          return { ...sp, openLeads: sp.openLeads - 1 };
+      
+      // Add note in Airtable if provided
+      if (note.trim()) {
+        await addNote(
+          selectedLead.id, 
+          note, 
+          selectedLead.assignedTo, 
+          'Call'  // Default communication type
+        );
+      }
+      
+      // Update local state
+      const wasOpen = !selectedLead.disposition;
+      const isNowClosed = disposition;
+      
+      // Update leads with new disposition
+      setLeads(leads.map(lead => {
+        if (lead.id === selectedLead.id) {
+          return { ...lead, disposition };
         }
-        return sp;
+        return lead;
       }));
+      
+      // Update salesperson's open lead count if necessary
+      if (selectedLead.assignedTo && wasOpen && isNowClosed) {
+        setSalesPeople(salesPeople.map(sp => {
+          if (sp.id === selectedLead.assignedTo) {
+            return { ...sp, openLeads: Math.max(0, sp.openLeads - 1) };
+          }
+          return sp;
+        }));
+      }
+      
+      closeLeadDetails();
+    } catch (error) {
+      console.error('Error saving lead details:', error);
+      alert('Failed to save lead details. Please try again.');
     }
-    
-    // Save note (in a real implementation, this would create a note in Airtable)
-    if (note) {
-      console.log(`Saving note for lead ${selectedLead.id}: ${note}`);
-      // This would call the Airtable API to create a new note
-    }
-    
-    closeLeadDetails();
   };
 
   // Render a lead card
@@ -199,6 +263,14 @@ const TruePrimeCRM = () => {
       )}
     </div>
   );
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="text-xl">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-100">
@@ -254,6 +326,11 @@ const TruePrimeCRM = () => {
             style={{ minHeight: "calc(100vh - 160px)" }}
           >
             {filteredLeads.map(lead => renderLeadCard(lead))}
+            {filteredLeads.length === 0 && (
+              <div className="text-center py-8 text-gray-500">
+                No leads available
+              </div>
+            )}
           </div>
         </div>
         
@@ -294,6 +371,11 @@ const TruePrimeCRM = () => {
                 {dragOverColumn === salesperson.id && assignedLeads.length === 0 && (
                   <div className="text-center py-8 text-gray-400">
                     Drop lead here
+                  </div>
+                )}
+                {assignedLeads.length === 0 && dragOverColumn !== salesperson.id && (
+                  <div className="text-center py-8 text-gray-500">
+                    No leads assigned
                   </div>
                 )}
               </div>
@@ -349,11 +431,9 @@ const TruePrimeCRM = () => {
                     onChange={(e) => setDisposition(e.target.value)}
                   >
                     <option value="">Select disposition...</option>
-                    <option value="Transferred">Transferred</option>
-                    <option value="LM">Left Message</option>
-                    <option value="Interested">Interested</option>
-                    <option value="Not Interested">Not Interested</option>
-                    <option value="Call Back">Call Back</option>
+                    {dispositionOptions.map(option => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
                   </select>
                 </div>
                 
@@ -368,6 +448,23 @@ const TruePrimeCRM = () => {
                     onChange={(e) => setNote(e.target.value)}
                   ></textarea>
                 </div>
+                
+                {/* Previous Notes */}
+                {leadNotes.length > 0 && (
+                  <div className="pt-2">
+                    <h3 className="text-sm font-medium text-gray-700 mb-1">Previous Notes</h3>
+                    <div className="border border-gray-200 rounded-md max-h-40 overflow-y-auto">
+                      {leadNotes.map((noteItem, index) => (
+                        <div key={index} className="p-2 border-b border-gray-200 last:border-b-0">
+                          <div className="text-xs text-gray-500">
+                            {new Date(noteItem.created).toLocaleString()} - {noteItem.communication}
+                          </div>
+                          <div className="text-sm">{noteItem.note}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="px-4 py-3 bg-gray-50 text-right rounded-b-lg">
@@ -385,4 +482,4 @@ const TruePrimeCRM = () => {
   );
 };
 
-export default TruePrimeCRM;
+export default TruePrimeKanban;
