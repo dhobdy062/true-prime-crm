@@ -1,11 +1,11 @@
 import React from 'react';
-import TruePrimeKanban from './components/TruePrimeKanban';
+import TruePrimeCRM from './components/TruePrimeCRM';  // Updated import
 import './App.css';
 
 function App() {
   return (
     <div className="App">
-      <TruePrimeKanban />
+      <TruePrimeCRM />
     </div>
   );
 }

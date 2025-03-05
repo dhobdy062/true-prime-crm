@@ -10,7 +10,7 @@ import {
   getDispositionOptions
 } from '../utils/airtable';
 
-const TruePrimeKanban = () => {
+const TruePrimeCRM = () => {
   // State for leads, salespeople, filters, and UI elements
   const [leads, setLeads] = useState([]);
   const [salesPeople, setSalesPeople] = useState([]);
@@ -482,4 +482,4 @@ const TruePrimeKanban = () => {
   );
 };
 
-export default TruePrimeKanban;
+export default TruePrimeCRM;
